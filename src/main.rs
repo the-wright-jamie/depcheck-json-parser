@@ -1,34 +1,24 @@
 use std::env;
-use std::fs;
+use std::process;
 
 fn main() {
+    // collect the passed in arguments
     let args: Vec<String> = env::args().collect();
 
-    let config = Config::new(&args);
+    // build our config based on the config layed out in the library
+    let config = json_parser::Config::build(&args).unwrap_or_else(|err| {
+        println!("There was a problem parsing the arguments: {err}");
+        process::exit(1)
+    });
 
-    println!("Searching for {}", config.query);
-    println!("In file {}", config.file_path);
-
-    let contents = fs::read_to_string(config.file_path).expect("Should have been able to read the file");
-
-    println!("With text:\n{contents}");
+    // if there's an error running the runner, print the error and exit 
+    if let Err(e) = json_parser::run(config) {
+        println!("Application error: {e}");
+        process::exit(1)
+    }
 
     /*let json: serde_json::Value =
         serde_json::from_str(the_file).expect("JSON was not well-formatted");
 
     println!("{}", json["potentialAction"][0]["actions"].len())*/
-}
-
-struct Config {
-    query: String,
-    file_path: String,
-}
-
-impl Config {
-    fn new(args: &[String]) -> Config {
-        let query = args[1].clone();
-        let file_path = args[2].clone();
-
-        Config { query, file_path }
-    }
 }
