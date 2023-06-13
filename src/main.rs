@@ -8,7 +8,9 @@ fn main() {
 
     // if there's an error running the runner, print the error and exit 
     if let Err(e) = depcheck_json_parser::run(args) {
-        println!("Application error: {e}");
+        println!("Error: {}", e.to_string());
+        println!("Use the -h (or --help) option to see usage.");
+
         process::exit(1)
     }
 
