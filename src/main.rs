@@ -1,18 +1,13 @@
-use std::env;
 use std::process;
+
+use clap::Parser;
 
 fn main() {
     // collect the passed in arguments
-    let args: Vec<String> = env::args().collect();
-
-    // build our config based on the config layed out in the library
-    let config = json_parser::Config::build(&args).unwrap_or_else(|err| {
-        println!("There was a problem parsing the arguments: {err}");
-        process::exit(1)
-    });
+    let args = depcheck_json_parser::Config::parse();
 
     // if there's an error running the runner, print the error and exit 
-    if let Err(e) = json_parser::run(config) {
+    if let Err(e) = depcheck_json_parser::run(args) {
         println!("Application error: {e}");
         process::exit(1)
     }
