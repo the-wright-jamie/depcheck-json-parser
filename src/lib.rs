@@ -1,4 +1,4 @@
-use std::{error::Error, fs::File, io::Read};
+use std::{error::Error, fs::File, io::{Read, self, Write}, env};
 
 use serde::{Deserialize, Serialize};
 use clap::Parser;
@@ -9,6 +9,10 @@ use serde_json::Value;
 pub struct Config {
     /// The path to the OWASP Dependency Checker JSON report
     scan_results_path: String,
+
+    /// What file name to use for the report
+    #[arg(short, long, default_value = "processed_report.json")]
+    report_file_name: String,
 
     /// Generates and a saves a machine readable report for later processing.
     /// If not present, will just print results to terminal.
@@ -121,6 +125,12 @@ struct CVSSV2 {
     severity: String,
 }
 
+struct ProcessingResults {
+    found_vulnerabilities: usize,
+    vulnerable_dependencies: usize,
+    dependencies: Vec<String>,
+}
+
 fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     let mut file = File::open(file_path)?;
     let mut contents = String::new();
@@ -132,56 +142,89 @@ fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     return Ok(report_json)
 }
 
-pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let json_result = parse_json(&config.scan_results_path);
-    let json;
-
-    match json_result {
-        Ok(raw_json) => {
-            json = raw_json;
+fn directory_check(report_file_name: &str) {
+    if let Ok(current_dir) = env::current_dir() {
+        let file_path = current_dir.join(report_file_name);
+        if file_path.exists() && file_path.is_file() {
+            println!("'{0}' exists in the current directory. It will be overwritten by this command. If you are ok with this then", report_file_name);
+            press_any_key();
         }
-        Err(raw_json) => {
-            println!("{raw_json}");
-            return Err(raw_json);
+    } else {
+        println!("Overwrite protection check failed. Please manually check that the file '{0}' will not be overwritten by this program.", report_file_name);
+        press_any_key();
+    }
+}
+
+pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    // Check if we are going to overwrite the previous report
+    if config.generate_report {
+        directory_check(&config.report_file_name);
+    }
+
+    let results = match parse_json(&config.scan_results_path) {
+        Ok(raw_json) => process_json(&raw_json),
+        Err(err) => {
+            return Err(err);
+        }
+    };
+
+    if config.generate_report {
+        println!("✍️ Writing report...");
+        if let Err(e) = save_processed_report(&results, &config.report_file_name) {
+            println!("❌ Unable to write report!");
+            println!("Error: {}", e.to_string());
+        } else {
+            println!("💾 Done!")
         }
     }
-    
-    let vulns = count_vulnerable_deps(&json);
-    let cve_list = list_vulnerable_deps(&json);
 
-    println!("Found {vulns} vulnerable dependencies");
-    println!("Vulnerable Dependencies List: ");
-    for cve in cve_list {
-        println!("{cve}");
+    if results.vulnerable_dependencies > 0 {
+        println!("Found {0} vulnerable dependencies, with a total of {1} vulnerabilities", results.vulnerable_dependencies, results.found_vulnerabilities);
+        let dependencies_str = results.dependencies.join(", ");
+        println!("[{}]", dependencies_str);
+    } else {
+        println!("🎉 All clear!")
     }
 
     Ok(())
 }
 
-fn count_vulnerable_deps(json_to_process: &ReportJson) -> usize {
-    let mut vulns = 0;
+fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
+    let mut total_vulnerabilities = 0;
+    let mut vulnerable_dependencies = 0;
+    let mut deps: Vec<String> = Vec::new();
+
     let dependencies = &json_to_process.dependencies;
 
     for dependency in dependencies {
-        for _vulnerabilities in &dependency.vulnerabilities {
-            vulns += 1;
+        for vulnerability in &dependency.vulnerabilities {
+            total_vulnerabilities += vulnerability.len();
+            vulnerable_dependencies += 1;
+            deps.push(dependency.file_name.clone())
         }
     }
 
-    vulns
+    ProcessingResults {
+        found_vulnerabilities: total_vulnerabilities,
+        vulnerable_dependencies,
+        dependencies: deps,
+    }
 }
 
-fn list_vulnerable_deps(json_to_process: &ReportJson) -> Vec<&str> {
-    let mut deps: Vec<&str> = Vec::new();
-    let dependencies = &json_to_process.dependencies;
+fn save_processed_report(results: &ProcessingResults, report_file_name: &str) -> Result<(), Box<dyn Error>> {
+    let current_dir = env::current_dir()?;
+    let file_path = current_dir.join(report_file_name);
+    let mut file = File::create(file_path)?;
+    let dependencies_str = results.dependencies.join(", ");
+    let content = format!("{0}\n{1}\n{2}", results.found_vulnerabilities, results.vulnerable_dependencies, dependencies_str);
+    file.write_all(content.as_bytes())?;
 
-    for dependency in dependencies {
-        for _vulnerabilities in &dependency.vulnerabilities {
-            deps.push(&dependency.file_name)
-        }
-    }
+    Ok(())
+}
 
-    deps
+fn press_any_key() {
+    println!("Press any key to continue...");
+    io::stdin().read_exact(&mut [0]).unwrap();
 }
 
 // TODO: TESTS
