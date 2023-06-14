@@ -53,10 +53,10 @@ struct ScanInfo {
 struct ProjectInfo {
     name: String,
     #[serde(rename = "groupID")]
-    group_id: String,
+    group_id: Option<String>,
     #[serde(rename = "artifactID")]
-    artifact_id: String,
-    version: String,
+    artifact_id: Option<String>,
+    version: Option<String>,
     report_date: String,
     credits: Credits,
 }
