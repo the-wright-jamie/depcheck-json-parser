@@ -11,21 +11,25 @@ pub struct Config {
     scan_results_path: String,
 
     /// What file name to use for the report
-    #[arg(short, long, default_value = "processed_report.json")]
+    #[arg(short, long, default_value = "processed_report.txt")]
     report_file_name: String,
+
+    /// Bypass overwrite protection
+    #[arg(short, long)]
+    force_overwrite: bool,
 
     /// Generates and a saves a machine readable report for later processing.
     /// If not present, will just print results to terminal.
     #[arg(short, long)]
     generate_report: bool,
 
-    /// Count the total found vulnerabilities 
+    /// Count the total found vulnerabilities
     #[arg(short, long)]
     count_vulnerabilities: bool,
 
-    /// List the vulnerable packages as part of the report
+    /// List the vulnerable dependencies from the report
     #[arg(short, long)]
-    list_packages: bool,
+    list_vulnerable_dependencies: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -77,11 +81,17 @@ struct Dependency {
     sha1: String,
     sha256: String,
     project_references: Vec<Value>,
-    included_by: Option<Vec<Value>>,
+    included_by: Option<Vec<IncludedBy>>,
     evidence_collected: EvidenceCollected,
     packages: Option<Vec<Value>>,
     vulnerability_ids: Option<Vec<VulnerabilityId>>,
     vulnerabilities: Option<Vec<Vulnerability>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IncludedBy {
+    reference: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -126,6 +136,7 @@ struct CVSSV2 {
 }
 
 struct ProcessingResults {
+    project_name: String,
     found_vulnerabilities: usize,
     vulnerable_dependencies: usize,
     dependencies: Vec<String>,
@@ -157,7 +168,7 @@ fn directory_check(report_file_name: &str) {
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     // Check if we are going to overwrite the previous report
-    if config.generate_report {
+    if config.generate_report && !config.force_overwrite {
         directory_check(&config.report_file_name);
     }
 
@@ -179,9 +190,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     }
 
     if results.vulnerable_dependencies > 0 {
+        println!("Results for {0}", results.project_name);
         println!("Found {0} vulnerable dependencies, with a total of {1} vulnerabilities", results.vulnerable_dependencies, results.found_vulnerabilities);
-        let dependencies_str = results.dependencies.join(", ");
-        println!("[{}]", dependencies_str);
+        if config.list_vulnerable_dependencies {
+            println!("--- Vulnerable Dependencies ---");
+            results.dependencies.iter().for_each(|dependency| println!("{0}", dependency))
+        }
     } else {
         println!("🎉 All clear!")
     }
@@ -196,27 +210,60 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
 
     let dependencies = &json_to_process.dependencies;
 
+    let longest_name = find_longest_name(&dependencies);
+
     for dependency in dependencies {
         for vulnerability in &dependency.vulnerabilities {
             total_vulnerabilities += vulnerability.len();
             vulnerable_dependencies += 1;
-            deps.push(dependency.file_name.clone())
+            if let Some(included_by) = &dependency.included_by {
+                let spaces = produce_spacing(&longest_name, &dependency.file_name);
+                deps.push(format!("{0}{1} from {2}", dependency.file_name, spaces, included_by[0].reference))
+            } else {
+                deps.push(dependency.file_name.clone())
+            }
         }
     }
 
     ProcessingResults {
+        project_name: json_to_process.project_info.name.clone(),
         found_vulnerabilities: total_vulnerabilities,
         vulnerable_dependencies,
         dependencies: deps,
     }
 }
 
+fn find_longest_name(dependencies: &Vec<Dependency>) -> usize {
+    let mut longest_name = 0;
+
+    for dependency in dependencies {
+        if let Some(_vulnerabilities) = &dependency.vulnerabilities {
+            if dependency.file_name.len() > longest_name {
+                longest_name = dependency.file_name.len();
+            }
+        }
+    }
+
+    longest_name
+}
+
+fn produce_spacing(longest_name: &usize, current_name: &str) -> String {
+    let how_many_spaces = longest_name - current_name.len();
+    let mut spaces = String::from("");
+
+    for _i in 0..how_many_spaces {
+        spaces.push(' ');
+    }
+    
+    spaces
+}
+
 fn save_processed_report(results: &ProcessingResults, report_file_name: &str) -> Result<(), Box<dyn Error>> {
     let current_dir = env::current_dir()?;
     let file_path = current_dir.join(report_file_name);
     let mut file = File::create(file_path)?;
-    let dependencies_str = results.dependencies.join(", ");
-    let content = format!("{0}\n{1}\n{2}", results.found_vulnerabilities, results.vulnerable_dependencies, dependencies_str);
+    let dependencies_str = results.dependencies.join("\n");
+    let content = format!("{0} vulnerabilities\n{1} vulnerable dependencies\n\n--- List of vulnerable dependencies ---\n{2}", results.found_vulnerabilities, results.vulnerable_dependencies, dependencies_str);
     file.write_all(content.as_bytes())?;
 
     Ok(())
@@ -226,83 +273,3 @@ fn press_any_key() {
     println!("Press any key to continue...");
     io::stdin().read_exact(&mut [0]).unwrap();
 }
-
-// TODO: TESTS
-/*#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn expect_no_vulns() {
-        let expected_result = 0;
-        let json_result = parse_json("test-data/dependency-check-report-1.json");
-        let json;
-
-        match json_result {
-            Ok(raw_json) => {
-                json = raw_json;
-            }
-            Err(raw_json) => {
-                assert_eq!(true, false);
-                return;
-            }
-        }
-
-        assert_eq!(expected_result, count_vulnerable_deps(&json));
-    }
-
-    #[test]
-    fn expect_two_vulns() {
-        let expected_result = 2;
-        let json_result = parse_json("test-data/dependency-check-report-2.json");
-        let json;
-
-        match json_result {
-            Ok(raw_json) => {
-                json = raw_json;
-            }
-            Err(raw_json) => {
-                assert_eq!(true, false);
-                return;
-            }
-        }
-        assert_eq!(expected_result, count_vulnerable_deps(&json));
-    }
-
-    #[test]
-    fn expect_ten_vulns() {
-        let expected_result = 10;
-        let json_result = parse_json("test-data/dependency-check-report-3.json");
-        let json;
-
-        match json_result {
-            Ok(raw_json) => {
-                json = raw_json;
-            }
-            Err(raw_json) => {
-                assert_eq!(true, false);
-                return;
-            }
-        }
-        assert_eq!(expected_result, count_vulnerable_deps(&json));
-    }
-
-    #[test]
-    fn expect_three_deps() {
-        let expected_result = 3;
-        let json_result = parse_json("test-data/dependency-check-report-1.json");
-        let json;
-
-        match json_result {
-            Ok(raw_json) => {
-                json = raw_json;
-            }
-            Err(raw_json) => {
-                assert_eq!(true, false);
-                return;
-            }
-        }
-
-        assert_eq!(expected_result, count_dependencies(&json));
-    }
-}*/
