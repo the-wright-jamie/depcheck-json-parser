@@ -180,12 +180,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     };
 
     if config.generate_report {
-        println!("✍️ Writing report...");
+        print!("✍️ Writing report...");
         if let Err(e) = save_processed_report(&results, &config.report_file_name) {
             println!("❌ Unable to write report!");
             println!("Error: {}", e.to_string());
         } else {
-            println!("💾 Done!")
+            print!(" Done! 💾 \n")
         }
     }
 
