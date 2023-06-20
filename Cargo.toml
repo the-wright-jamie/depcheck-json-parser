@@ -1,5 +1,5 @@
 [package]
-name = "depcheck_json_parser"
+name = "depcheck-json-parser"
 version = "0.9.0"
 authors = ["Jamie Wright"]
 description = "JSON Parser and Processor for OWASP Dependency Checker. To be used as part of a security monitoring and reporting toolchain."
