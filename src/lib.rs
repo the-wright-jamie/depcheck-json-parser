@@ -80,7 +80,7 @@ struct Dependency {
     md5: Option<String>,
     sha1: Option<String>,
     sha256: Option<String>,
-    project_references: Vec<Value>,
+    project_references: Option<Vec<Value>>,
     included_by: Option<Vec<IncludedBy>>,
     evidence_collected: EvidenceCollected,
     packages: Option<Vec<Value>>,
