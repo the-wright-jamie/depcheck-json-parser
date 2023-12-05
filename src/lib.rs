@@ -129,7 +129,7 @@ struct CVSSV2 {
     access_vector: String,
     access_complexity: String,
     authenticationr: String,
-    confidential_impact: String,
+    confidential_impact: Option<String>,
     integrity_impact: String,
     availability_impact: String,
     severity: String,
