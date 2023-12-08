@@ -1,35 +1,27 @@
-use std::{error::Error, fs::File, io::{Read, self, Write}, env};
+use std::{error::Error, fs::File, io::Read, string};
 
 use serde::{Deserialize, Serialize};
 use clap::Parser;
 use serde_json::Value;
 
+// Struct for the config
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Config {
     /// The path to the OWASP Dependency Checker JSON report
     scan_results_path: String,
 
-    /// What file name to use for the report
-    #[arg(short, long, default_value = "processed_report.txt")]
-    report_file_name: String,
-
-    /// Bypass overwrite protection
-    #[arg(short, long)]
-    force_overwrite: bool,
-
-    /// Generates and a saves a machine readable report for later processing.
-    /// If not present, will just print results to terminal.
-    #[arg(short, long)]
-    generate_report: bool,
-
-    /// Count the total found vulnerabilities
-    #[arg(short, long)]
-    count_vulnerabilities: bool,
-
     /// List the vulnerable dependencies from the report
     #[arg(short, long)]
     list_vulnerable_dependencies: bool,
+
+    /// List details regarding CVEs on vulnerability
+    #[arg(short, long)]
+    details: bool,
+
+    /// Print colorless
+    #[arg(short, long)]
+    no_color: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -135,6 +127,12 @@ struct CVSSV2 {
     severity: String,
 }
 
+static mut RED: &str = "\x1b[1;31m";
+static mut BOLD: &str = "\x1b[1m";
+static mut YELLOW: &str = "\x1b[93m";
+static mut RESET: &str = "\x1b[0m";
+static mut UNDERLINE: &str = "\x1b[4m";
+
 struct ProcessingResults {
     project_name: String,
     found_vulnerabilities: usize,
@@ -153,24 +151,20 @@ fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     return Ok(report_json)
 }
 
-fn directory_check(report_file_name: &str) {
-    if let Ok(current_dir) = env::current_dir() {
-        let file_path = current_dir.join(report_file_name);
-        if file_path.exists() && file_path.is_file() {
-            println!("'{0}' exists in the current directory. It will be overwritten by this command. If you are ok with this then", report_file_name);
-            press_any_key();
+fn set_colors() {
+    if Config::parse().no_color {
+        unsafe {
+            RED = "";
+            BOLD = "";
+            YELLOW = "";
+            RESET = "";
+            UNDERLINE = "";
         }
-    } else {
-        println!("Overwrite protection check failed. Please manually check that the file '{0}' will not be overwritten by this program.", report_file_name);
-        press_any_key();
     }
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    // Check if we are going to overwrite the previous report
-    if config.generate_report && !config.force_overwrite {
-        directory_check(&config.report_file_name);
-    }
+    set_colors();
 
     let results = match parse_json(&config.scan_results_path) {
         Ok(raw_json) => process_json(&raw_json),
@@ -179,22 +173,21 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
         }
     };
 
-    if config.generate_report {
-        print!("✍️ Writing report...");
-        if let Err(e) = save_processed_report(&results, &config.report_file_name) {
-            println!("❌ Unable to write report!");
-            println!("Error: {}", e.to_string());
-        } else {
-            print!(" Done! 💾 \n")
-        }
-    }
-
     if results.vulnerable_dependencies > 0 {
-        println!("Results for {0}", results.project_name);
-        println!("Found {0} vulnerable dependencies, with a total of {1} vulnerabilities", results.vulnerable_dependencies, results.found_vulnerabilities);
+        println!("Results for {BOLD}{0}{RESET}", results.project_name);
+        println!("Found {RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}, with a total of {RED}{1}{RESET} {BOLD}vulnerabilities{RESET}", results.vulnerable_dependencies, results.found_vulnerabilities);
         if config.list_vulnerable_dependencies {
-            println!("--- Vulnerable Dependencies ---");
+            println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}");
             results.dependencies.iter().for_each(|dependency| println!("{0}", dependency))
+        }
+        if config.details {
+            println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}");
+            match parse_json(&config.scan_results_path) {
+                Ok(raw_json) => print_cves(&raw_json),
+                Err(err) => {
+                    return Err(err);
+                }
+            };
         }
     } else {
         println!("🎉 All clear!")
@@ -203,22 +196,26 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn get_dependencies_from_json(json_to_process: &ReportJson) -> &Vec<Dependency> {
+    &json_to_process.dependencies
+}
+
 fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
     let mut total_vulnerabilities = 0;
     let mut vulnerable_dependencies = 0;
     let mut deps: Vec<String> = Vec::new();
 
-    let dependencies = &json_to_process.dependencies;
+    let dependencies = get_dependencies_from_json(json_to_process);
 
     let longest_name = find_longest_name(&dependencies);
 
     for dependency in dependencies {
-        for vulnerability in &dependency.vulnerabilities {
-            total_vulnerabilities += vulnerability.len();
+        for vulnerabilities in &dependency.vulnerabilities {
+            total_vulnerabilities += vulnerabilities.len();
             vulnerable_dependencies += 1;
             if let Some(included_by) = &dependency.included_by {
                 let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                deps.push(format!("{0}{1} from {2}", dependency.file_name, spaces, included_by[0].reference))
+                deps.push(format!("{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}", dependency.file_name, spaces, included_by[0].reference))
             } else {
                 deps.push(dependency.file_name.clone())
             }
@@ -230,6 +227,26 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
         found_vulnerabilities: total_vulnerabilities,
         vulnerable_dependencies,
         dependencies: deps,
+    }
+}
+
+fn print_cves(json_to_process: &ReportJson){
+    let dependencies = get_dependencies_from_json(json_to_process);
+
+    let longest_name = find_longest_name(&dependencies);
+
+    for dependency in dependencies {
+        for vulnerabilities in &dependency.vulnerabilities {
+            if let Some(included_by) = &dependency.included_by {
+                let spaces = produce_spacing(&longest_name, &dependency.file_name);
+                println!("{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}", dependency.file_name, included_by[0].reference);
+            } else {
+                println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name);
+            }
+            for vulnerability in vulnerabilities {
+                println!("{RED}{0}{RESET}: {1}\n", vulnerability.name, vulnerability.description);
+            }
+        }
     }
 }
 
@@ -254,22 +271,6 @@ fn produce_spacing(longest_name: &usize, current_name: &str) -> String {
     for _i in 0..how_many_spaces {
         spaces.push(' ');
     }
-    
+
     spaces
-}
-
-fn save_processed_report(results: &ProcessingResults, report_file_name: &str) -> Result<(), Box<dyn Error>> {
-    let current_dir = env::current_dir()?;
-    let file_path = current_dir.join(report_file_name);
-    let mut file = File::create(file_path)?;
-    let dependencies_str = results.dependencies.join("\n");
-    let content = format!("{0} vulnerabilities\n{1} vulnerable dependencies\n\n--- List of vulnerable dependencies ---\n{2}", results.found_vulnerabilities, results.vulnerable_dependencies, dependencies_str);
-    file.write_all(content.as_bytes())?;
-
-    Ok(())
-}
-
-fn press_any_key() {
-    println!("Press any key to continue...");
-    io::stdin().read_exact(&mut [0]).unwrap();
 }
