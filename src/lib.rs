@@ -1,4 +1,4 @@
-use std::{error::Error, fs::File, io::Read, string};
+use std::{error::Error, fs::File, io::Read};
 
 use serde::{Deserialize, Serialize};
 use clap::Parser;
@@ -174,14 +174,16 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     };
 
     if results.vulnerable_dependencies > 0 {
-        println!("Results for {BOLD}{0}{RESET}", results.project_name);
-        println!("Found {RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}, with a total of {RED}{1}{RESET} {BOLD}vulnerabilities{RESET}", results.vulnerable_dependencies, results.found_vulnerabilities);
+        unsafe {
+            println!("Results for {BOLD}{0}{RESET}", results.project_name);
+            println!("Found {RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}, with a total of {RED}{1}{RESET} {BOLD}vulnerabilities{RESET}", results.vulnerable_dependencies, results.found_vulnerabilities);
+        }
         if config.list_vulnerable_dependencies {
-            println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}");
+            unsafe { println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}"); }
             results.dependencies.iter().for_each(|dependency| println!("{0}", dependency))
         }
         if config.details {
-            println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}");
+            unsafe { println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}"); }
             match parse_json(&config.scan_results_path) {
                 Ok(raw_json) => print_cves(&raw_json),
                 Err(err) => {
@@ -215,7 +217,7 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
             vulnerable_dependencies += 1;
             if let Some(included_by) = &dependency.included_by {
                 let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                deps.push(format!("{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}", dependency.file_name, spaces, included_by[0].reference))
+                unsafe { deps.push(format!("{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}", dependency.file_name, spaces, included_by[0].reference)) }
             } else {
                 deps.push(dependency.file_name.clone())
             }
@@ -239,12 +241,12 @@ fn print_cves(json_to_process: &ReportJson){
         for vulnerabilities in &dependency.vulnerabilities {
             if let Some(included_by) = &dependency.included_by {
                 let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                println!("{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}", dependency.file_name, included_by[0].reference);
+                unsafe { println!("{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}", dependency.file_name, included_by[0].reference); }
             } else {
-                println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name);
+                unsafe { println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name); }
             }
             for vulnerability in vulnerabilities {
-                println!("{RED}{0}{RESET}: {1}\n", vulnerability.name, vulnerability.description);
+                unsafe { println!("{RED}{0}{RESET}: {1}\n", vulnerability.name, vulnerability.description); }
             }
         }
     }
