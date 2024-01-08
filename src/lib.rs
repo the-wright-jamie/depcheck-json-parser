@@ -1,7 +1,7 @@
 use std::{error::Error, fs::File, io::Read};
 
-use serde::{Deserialize, Serialize};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // Struct for the config
@@ -37,7 +37,7 @@ struct ReportJson {
 #[serde(rename_all = "camelCase")]
 struct ScanInfo {
     engine_version: String,
-    data_source: Vec<Value>
+    data_source: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -148,7 +148,7 @@ fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     let json_value: Value = serde_json::from_str(&contents)?;
     let report_json: ReportJson = serde_json::from_value(json_value).expect("msg");
 
-    return Ok(report_json)
+    return Ok(report_json);
 }
 
 fn set_colors() {
@@ -175,15 +175,36 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     if results.vulnerable_dependencies > 0 {
         unsafe {
-            println!("Results for {BOLD}{0}{RESET}", results.project_name);
-            println!("Found {RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}, with a total of {RED}{1}{RESET} {BOLD}vulnerabilities{RESET}", results.vulnerable_dependencies, results.found_vulnerabilities);
+            if results.project_name == "" {
+                println!("{RED}Vulnerable dependencies found{RESET}");
+            } else {
+                println!(
+                    "{RED}Vulnerable dependencies found in {BOLD}{0}{RESET}",
+                    results.project_name
+                );
+            }
+            println!(
+                "{RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}",
+                results.vulnerable_dependencies
+            );
+            println!(
+                "{RED}{0}{RESET} {BOLD}total vulnerabilities{RESET}",
+                results.found_vulnerabilities
+            );
         }
         if config.list_vulnerable_dependencies {
-            unsafe { println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}"); }
-            results.dependencies.iter().for_each(|dependency| println!("{0}", dependency))
+            unsafe {
+                println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}");
+            }
+            results
+                .dependencies
+                .iter()
+                .for_each(|dependency| println!("{0}", dependency))
         }
         if config.details {
-            unsafe { println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}"); }
+            unsafe {
+                println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}");
+            }
             match parse_json(&config.scan_results_path) {
                 Ok(raw_json) => print_cves(&raw_json),
                 Err(err) => {
@@ -217,7 +238,12 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
             vulnerable_dependencies += 1;
             if let Some(included_by) = &dependency.included_by {
                 let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                unsafe { deps.push(format!("{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}", dependency.file_name, spaces, included_by[0].reference)) }
+                unsafe {
+                    deps.push(format!(
+                        "{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}",
+                        dependency.file_name, spaces, included_by[0].reference
+                    ))
+                }
             } else {
                 deps.push(dependency.file_name.clone())
             }
@@ -232,7 +258,7 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
     }
 }
 
-fn print_cves(json_to_process: &ReportJson){
+fn print_cves(json_to_process: &ReportJson) {
     let dependencies = get_dependencies_from_json(json_to_process);
 
     let longest_name = find_longest_name(&dependencies);
@@ -241,12 +267,24 @@ fn print_cves(json_to_process: &ReportJson){
         for vulnerabilities in &dependency.vulnerabilities {
             if let Some(included_by) = &dependency.included_by {
                 let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                unsafe { println!("{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}", dependency.file_name, included_by[0].reference); }
+                unsafe {
+                    println!(
+                        "{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}",
+                        dependency.file_name, included_by[0].reference
+                    );
+                }
             } else {
-                unsafe { println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name); }
+                unsafe {
+                    println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name);
+                }
             }
             for vulnerability in vulnerabilities {
-                unsafe { println!("{RED}{0}{RESET}: {1}\n", vulnerability.name, vulnerability.description); }
+                unsafe {
+                    println!(
+                        "{RED}{0}{RESET}: {1}\n",
+                        vulnerability.name, vulnerability.description
+                    );
+                }
             }
         }
     }
