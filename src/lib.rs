@@ -175,7 +175,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     if results.vulnerable_dependencies > 0 {
         unsafe {
-            if results.project_name == "" {
+            if results.project_name.is_empty() {
                 println!("{RED}Vulnerable dependencies found{RESET}");
             } else {
                 println!(
@@ -230,7 +230,7 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
 
     let dependencies = get_dependencies_from_json(json_to_process);
 
-    let longest_name = find_longest_name(&dependencies);
+    let longest_name = find_longest_name(dependencies);
 
     for dependency in dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
@@ -261,7 +261,7 @@ fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
 fn print_cves(json_to_process: &ReportJson) {
     let dependencies = get_dependencies_from_json(json_to_process);
 
-    let longest_name = find_longest_name(&dependencies);
+    let longest_name = find_longest_name(dependencies);
 
     for dependency in dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
