@@ -1,6 +1,7 @@
 use std::{error::Error, fs::File, io::Read};
 
 use clap::Parser;
+use colored::{ColoredString, Colorize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,6 +12,10 @@ pub struct Config {
     /// The path to the OWASP Dependency Checker JSON report
     scan_results_path: String,
 
+    /// Display total severity ratings
+    #[arg(short, long)]
+    severity_ratings: bool,
+
     /// List the vulnerable dependencies from the report
     #[arg(short, long)]
     list_vulnerable_dependencies: bool,
@@ -18,10 +23,6 @@ pub struct Config {
     /// List details regarding CVEs on vulnerability
     #[arg(short, long)]
     details: bool,
-
-    /// Print colorless
-    #[arg(short, long)]
-    no_color: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -105,13 +106,21 @@ struct VulnerabilityId {
 struct Vulnerability {
     source: String,
     name: String,
-    severity: String,
+    severity: SeverityKind,
     cvssv2: Option<CVSSV2>,
     cwes: Vec<Value>,
     description: String,
     notes: String,
     references: Vec<Value>,
     vulnerable_software: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+enum SeverityKind {
+    CRITICAL,
+    HIGH,
+    MEDIUM,
+    LOW,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -127,19 +136,6 @@ struct CVSSV2 {
     severity: String,
 }
 
-static mut RED: &str = "\x1b[1;31m";
-static mut BOLD: &str = "\x1b[1m";
-static mut YELLOW: &str = "\x1b[93m";
-static mut RESET: &str = "\x1b[0m";
-static mut UNDERLINE: &str = "\x1b[4m";
-
-struct ProcessingResults {
-    project_name: String,
-    found_vulnerabilities: usize,
-    vulnerable_dependencies: usize,
-    dependencies: Vec<String>,
-}
-
 fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     let mut file = File::open(file_path)?;
     let mut contents = String::new();
@@ -151,66 +147,24 @@ fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
     return Ok(report_json);
 }
 
-fn set_colors() {
-    if Config::parse().no_color {
-        unsafe {
-            RED = "";
-            BOLD = "";
-            YELLOW = "";
-            RESET = "";
-            UNDERLINE = "";
-        }
-    }
-}
-
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    set_colors();
-
-    let results = match parse_json(&config.scan_results_path) {
-        Ok(raw_json) => process_json(&raw_json),
+    let parsed_json = match parse_json(&config.scan_results_path) {
+        Ok(raw_json) => raw_json,
         Err(err) => {
             return Err(err);
         }
     };
 
-    if results.vulnerable_dependencies > 0 {
-        unsafe {
-            if results.project_name.is_empty() {
-                println!("{RED}Vulnerable dependencies found{RESET}");
-            } else {
-                println!(
-                    "{RED}Vulnerable dependencies found in {BOLD}{0}{RESET}",
-                    results.project_name
-                );
-            }
-            println!(
-                "{RED}{0}{RESET} {BOLD}vulnerable dependencies{RESET}",
-                results.vulnerable_dependencies
-            );
-            println!(
-                "{RED}{0}{RESET} {BOLD}total vulnerabilities{RESET}",
-                results.found_vulnerabilities
-            );
+    if count_vulnerable_dependencies(&parsed_json.dependencies) > 0 {
+        print_summary(&parsed_json);
+        if config.severity_ratings {
+            print_severities(&parsed_json);
         }
         if config.list_vulnerable_dependencies {
-            unsafe {
-                println!("\n{BOLD}{UNDERLINE}Vulnerable Dependencies List{RESET}");
-            }
-            results
-                .dependencies
-                .iter()
-                .for_each(|dependency| println!("{0}", dependency))
+            print_vulnerable_dependencies_list(&parsed_json.dependencies);
         }
         if config.details {
-            unsafe {
-                println!("\n{BOLD}{UNDERLINE}Vulnerability Details{RESET}");
-            }
-            match parse_json(&config.scan_results_path) {
-                Ok(raw_json) => print_cves(&raw_json),
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            print_cves(&parsed_json);
         }
     } else {
         println!("🎉 All clear!")
@@ -219,74 +173,150 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_dependencies_from_json(json_to_process: &ReportJson) -> &Vec<Dependency> {
-    &json_to_process.dependencies
+fn print_severities(json: &ReportJson) {
+    println!("\n{}", "Severity Enumeration".bold().underline());
+    let (mut critical_count, mut high_count, mut medium_count, mut low_count) = (0, 0, 0, 0);
+
+    for dependency in &json.dependencies {
+        for vulnerabilities in &dependency.vulnerabilities {
+            vulnerabilities
+                .iter()
+                .for_each(|vulnerability| match vulnerability.severity {
+                    SeverityKind::CRITICAL => critical_count += 1,
+                    SeverityKind::HIGH => high_count += 1,
+                    SeverityKind::MEDIUM => medium_count += 1,
+                    SeverityKind::LOW => low_count += 1,
+                })
+        }
+    }
+
+    println!(
+        "{} {}",
+        critical_count.to_string().bold(),
+        coloured_severity(&SeverityKind::CRITICAL)
+    );
+
+    println!(
+        "{} {}",
+        high_count.to_string().bold(),
+        coloured_severity(&SeverityKind::HIGH)
+    );
+
+    println!(
+        "{} {}",
+        medium_count.to_string().bold(),
+        coloured_severity(&SeverityKind::MEDIUM)
+    );
+    println!(
+        "{} {}",
+        low_count.to_string().bold(),
+        coloured_severity(&SeverityKind::LOW)
+    );
 }
 
-fn process_json(json_to_process: &ReportJson) -> ProcessingResults {
-    let mut total_vulnerabilities = 0;
+fn print_summary(json: &ReportJson) {
+    let vulnerable_dependencies: usize = count_vulnerable_dependencies(&json.dependencies);
+
+    if json.project_info.name.is_empty() {
+        println!(
+            "{} {} found",
+            vulnerable_dependencies.to_string().bold().red(),
+            "vulnerable dependencies".bold()
+        );
+    } else {
+        println!(
+            "{} {} found in {}",
+            vulnerable_dependencies.to_string().bold().red(),
+            "vulnerable dependencies".bold(),
+            json.project_info.name.red().bold(),
+        );
+    }
+    let total_cves: usize = count_total_cves(&json.dependencies);
+    println!(
+        "{} {}",
+        total_cves.to_string().bold().red(),
+        "total CVEs".bold()
+    );
+}
+
+fn count_vulnerable_dependencies(dependencies: &Vec<Dependency>) -> usize {
     let mut vulnerable_dependencies = 0;
-    let mut deps: Vec<String> = Vec::new();
 
-    let dependencies = get_dependencies_from_json(json_to_process);
+    for dependency in dependencies {
+        dependency
+            .vulnerabilities
+            .iter()
+            .for_each(|_| vulnerable_dependencies += 1);
+    }
 
-    let longest_name = find_longest_name(dependencies);
+    vulnerable_dependencies
+}
+
+fn count_total_cves(dependencies: &Vec<Dependency>) -> usize {
+    let mut total_vulnerabilities = 0;
 
     for dependency in dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
             total_vulnerabilities += vulnerabilities.len();
-            vulnerable_dependencies += 1;
-            if let Some(included_by) = &dependency.included_by {
-                let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                unsafe {
-                    deps.push(format!(
-                        "{YELLOW}{0}{RESET}{1} from {BOLD}{2}{RESET}",
-                        dependency.file_name, spaces, included_by[0].reference
-                    ))
-                }
-            } else {
-                deps.push(dependency.file_name.clone())
-            }
         }
     }
 
-    ProcessingResults {
-        project_name: json_to_process.project_info.name.clone(),
-        found_vulnerabilities: total_vulnerabilities,
-        vulnerable_dependencies,
-        dependencies: deps,
+    total_vulnerabilities
+}
+
+fn print_vulnerable_dependencies_list(dependencies: &Vec<Dependency>) {
+    println!("\n{}", "Vulnerable Dependencies List".bold().underline());
+
+    let longest_name_size = find_longest_name(dependencies);
+
+    for dependency in dependencies {
+        dependency.vulnerabilities.iter().for_each(|_| {
+            print_single_vulnerable_dependency(&longest_name_size, &dependency);
+        })
+    }
+}
+
+fn print_single_vulnerable_dependency(longest_name_size: &usize, dependency: &Dependency) {
+    if let Some(included_by) = &dependency.included_by {
+        let spaces = " ".repeat(how_many_spaces(&longest_name_size, &dependency.file_name));
+        println!(
+            "{0}{1} from {2}",
+            dependency.file_name.yellow(),
+            spaces,
+            included_by[0].reference.bold()
+        );
+    } else {
+        println!("{}", dependency.file_name.yellow());
     }
 }
 
 fn print_cves(json_to_process: &ReportJson) {
-    let dependencies = get_dependencies_from_json(json_to_process);
+    println!("\n{}", "Vulnerability Details".bold().underline());
 
-    let longest_name = find_longest_name(dependencies);
+    let dependencies = &json_to_process.dependencies;
+    let longest_name_size = find_longest_name(dependencies);
 
     for dependency in dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
-            if let Some(included_by) = &dependency.included_by {
-                let spaces = produce_spacing(&longest_name, &dependency.file_name);
-                unsafe {
-                    println!(
-                        "{UNDERLINE}{YELLOW}{0}{RESET}{spaces} from {BOLD}{1}{RESET}",
-                        dependency.file_name, included_by[0].reference
-                    );
-                }
-            } else {
-                unsafe {
-                    println!("\n{UNDERLINE}{YELLOW}{0}{RESET}", dependency.file_name);
-                }
-            }
+            print_single_vulnerable_dependency(&longest_name_size, &dependency);
             for vulnerability in vulnerabilities {
-                unsafe {
-                    println!(
-                        "{RED}{0}{RESET}: {1}\n",
-                        vulnerability.name, vulnerability.description
-                    );
-                }
+                println!(
+                    "{1} ({0})\n{2}\n",
+                    coloured_severity(&vulnerability.severity),
+                    vulnerability.name.red().bold(),
+                    vulnerability.description
+                );
             }
         }
+    }
+}
+
+fn coloured_severity(severity: &SeverityKind) -> ColoredString {
+    match severity {
+        SeverityKind::CRITICAL => "CRITICAL".red().bold(),
+        SeverityKind::HIGH => "HIGH".truecolor(255, 165, 0),
+        SeverityKind::MEDIUM => "MEDIUM".yellow(),
+        SeverityKind::LOW => "LOW".blue(),
     }
 }
 
@@ -304,13 +334,6 @@ fn find_longest_name(dependencies: &Vec<Dependency>) -> usize {
     longest_name
 }
 
-fn produce_spacing(longest_name: &usize, current_name: &str) -> String {
-    let how_many_spaces = longest_name - current_name.len();
-    let mut spaces = String::from("");
-
-    for _i in 0..how_many_spaces {
-        spaces.push(' ');
-    }
-
-    spaces
+fn how_many_spaces(longest_name: &usize, current_name: &str) -> usize {
+    longest_name - current_name.len()
 }

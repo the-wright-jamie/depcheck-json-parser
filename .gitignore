@@ -17,3 +17,6 @@ processed_report.json
 processed_report.txt
 dependency-check-report.json
 .DS_Store
+.scannerwork
+sonar-project.properties
+clip.json
