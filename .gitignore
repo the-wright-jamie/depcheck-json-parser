@@ -20,3 +20,4 @@ dependency-check-report.json
 .scannerwork
 sonar-project.properties
 clip.json
+src/dependency-check-report-npm.json

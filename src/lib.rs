@@ -106,8 +106,8 @@ struct VulnerabilityId {
 struct Vulnerability {
     source: String,
     name: String,
-    severity: SeverityKind,
-    cvssv2: Option<CVSSV2>,
+    severity: String,
+    cvssv3: CVSSV3,
     cwes: Vec<Value>,
     description: String,
     notes: String,
@@ -125,15 +125,8 @@ enum SeverityKind {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CVSSV2 {
-    score: f32,
-    access_vector: String,
-    access_complexity: String,
-    authenticationr: String,
-    confidential_impact: Option<String>,
-    integrity_impact: String,
-    availability_impact: String,
-    severity: String,
+struct CVSSV3 {
+    base_severity: SeverityKind,
 }
 
 fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
@@ -179,14 +172,14 @@ fn print_severities(json: &ReportJson) {
 
     for dependency in &json.dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
-            vulnerabilities
-                .iter()
-                .for_each(|vulnerability| match vulnerability.severity {
+            vulnerabilities.iter().for_each(|vulnerability| {
+                match vulnerability.cvssv3.base_severity {
                     SeverityKind::CRITICAL => critical_count += 1,
                     SeverityKind::HIGH => high_count += 1,
                     SeverityKind::MEDIUM => medium_count += 1,
                     SeverityKind::LOW => low_count += 1,
-                })
+                }
+            })
         }
     }
 
@@ -302,7 +295,7 @@ fn print_cves(json_to_process: &ReportJson) {
             for vulnerability in vulnerabilities {
                 println!(
                     "{1} ({0})\n{2}\n",
-                    coloured_severity(&vulnerability.severity),
+                    coloured_severity(&vulnerability.cvssv3.base_severity),
                     vulnerability.name.red().bold(),
                     vulnerability.description
                 );
