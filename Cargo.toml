@@ -1,6 +1,6 @@
 [package]
 name = "depcheck-json-parser"
-version = "0.12.1"
+version = "0.12.2"
 authors = ["Jamie Wright"]
 description = "JSON Parser and Processor for OWASP Dependency Checker. To be used as part of a security monitoring and reporting toolchain."
 homepage = "https://github.com/the-wright-jamie/depcheck-json-parser"
@@ -11,7 +11,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.4.18", features = ["derive"] }
-serde = { version = "1.0.195", features = ["derive"] }
-serde_json = "1.0.111"
+clap = { version = "4.5.4", features = ["derive"] }
+serde = { version = "1.0.200", features = ["derive"] }
+serde_json = "1.0.116"
 colored = "2.1.0"

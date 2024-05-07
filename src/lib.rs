@@ -106,8 +106,8 @@ struct VulnerabilityId {
 struct Vulnerability {
     source: String,
     name: String,
-    severity: String,
-    cvssv3: CVSSV3,
+    severity: SeverityKind,
+    cvssv3: Option<CVSSV3>,
     cwes: Vec<Value>,
     description: String,
     notes: String,
@@ -116,17 +116,21 @@ struct Vulnerability {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-enum SeverityKind {
-    CRITICAL,
-    HIGH,
-    MEDIUM,
-    LOW,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CVSSV3 {
     base_severity: SeverityKind,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+enum SeverityKind {
+    CRITICAL,
+    critical,
+    HIGH,
+    high,
+    MEDIUM,
+    moderate,
+    LOW,
+    low,
 }
 
 fn parse_json(file_path: &str) -> Result<ReportJson, Box<dyn Error>> {
@@ -173,11 +177,23 @@ fn print_severities(json: &ReportJson) {
     for dependency in &json.dependencies {
         for vulnerabilities in &dependency.vulnerabilities {
             vulnerabilities.iter().for_each(|vulnerability| {
-                match vulnerability.cvssv3.base_severity {
-                    SeverityKind::CRITICAL => critical_count += 1,
-                    SeverityKind::HIGH => high_count += 1,
-                    SeverityKind::MEDIUM => medium_count += 1,
-                    SeverityKind::LOW => low_count += 1,
+                match &vulnerability.cvssv3 {
+                    None => {
+                        match vulnerability.severity {
+                            SeverityKind::CRITICAL | SeverityKind::critical => critical_count += 1,
+                            SeverityKind::HIGH | SeverityKind::high => high_count += 1,
+                            SeverityKind::MEDIUM | SeverityKind::moderate => medium_count += 1,
+                            SeverityKind::LOW | SeverityKind::low  => low_count += 1,
+                        }
+                    },
+                    Some(vuln) => { 
+                        match vuln.base_severity {
+                            SeverityKind::CRITICAL | SeverityKind::critical => critical_count += 1,
+                            SeverityKind::HIGH | SeverityKind::high => high_count += 1,
+                            SeverityKind::MEDIUM | SeverityKind::moderate => medium_count += 1,
+                            SeverityKind::LOW | SeverityKind::low  => low_count += 1,
+                        }
+                    }
                 }
             })
         }
@@ -293,12 +309,24 @@ fn print_cves(json_to_process: &ReportJson) {
         for vulnerabilities in &dependency.vulnerabilities {
             print_single_vulnerable_dependency(&longest_name_size, &dependency);
             for vulnerability in vulnerabilities {
-                println!(
-                    "{1} ({0})\n{2}\n",
-                    coloured_severity(&vulnerability.cvssv3.base_severity),
-                    vulnerability.name.red().bold(),
-                    vulnerability.description
-                );
+                match &vulnerability.cvssv3 {
+                    None => {
+                        println!(
+                            "{1} ({0})\n{2}\n",
+                            coloured_severity(&vulnerability.severity),
+                            vulnerability.name.red().bold(),
+                            vulnerability.description
+                        );
+                    }
+                    Some(vuln) => {
+                        println!(
+                            "{1} ({0})\n{2}\n",
+                            coloured_severity(&vuln.base_severity),
+                            vulnerability.name.red().bold(),
+                            vulnerability.description
+                        );
+                    }
+                }
             }
         }
     }
@@ -306,10 +334,11 @@ fn print_cves(json_to_process: &ReportJson) {
 
 fn coloured_severity(severity: &SeverityKind) -> ColoredString {
     match severity {
-        SeverityKind::CRITICAL => "CRITICAL".red().bold(),
-        SeverityKind::HIGH => "HIGH".truecolor(255, 165, 0),
+        SeverityKind::CRITICAL | SeverityKind::critical => "CRITICAL".red().bold(),
+        SeverityKind::HIGH | SeverityKind::high => "HIGH".truecolor(255, 165, 0),
         SeverityKind::MEDIUM => "MEDIUM".yellow(),
-        SeverityKind::LOW => "LOW".blue(),
+        SeverityKind::moderate => "MODERATE".yellow(),
+        SeverityKind::LOW | SeverityKind::low => "LOW".blue(),
     }
 }
 
